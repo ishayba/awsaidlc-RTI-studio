@@ -1,0 +1,470 @@
+# Spaces and Intents
+
+[Your First Workflow](02-your-first-workflow.md) walked through one run from start
+to finish. But real work is rarely one thing at a time: you have a feature in
+flight, an urgent bug lands, a second team shares the repo. This chapter explains
+how AI-DLC organizes **many** pieces of work in **one** place — the *workspace* —
+and the two concepts you use to navigate it: **spaces** and **intents**.
+
+The short version: an **intent** is one piece of work (one run of the lifecycle);
+a **space** is one team's world of intents, knowledge, and practices. Most people
+work in a single space (called `default`) and never think about spaces at all —
+they just start intents and switch between them. The rest of this chapter shows
+how that works and where everything lives.
+
+---
+
+## One workspace, organized by what you're working on
+
+When you run `aidlc config`, it projects the selected engine into one
+harness-specific directory (`.claude/` on Claude Code, `.kiro/` on Kiro,
+`.codex/` on Codex, `.aidlc/` on opencode and GitHub Copilot). That directory is the *only* part of the layout that
+differs by harness. From then on, everything AI-DLC produces lives under one
+neutral `aidlc/` directory at your project root — organized by *what you're
+working on*, not by which harness you happen to run. You browse `aidlc/`; you
+never need to open the engine directory.
+
+Here is a complete workspace with two teams and a few intents in flight (the
+engine directory is shown as `.claude/` — read it as `.kiro/` or `.codex/` on
+those harnesses). Read it top to bottom — it is the mental model the rest of
+this chapter builds on:
+
+```
+my-project/
+│
+├── .claude/                      THE ENGINE — tools, hooks, skills, agents.
+│                                 (or .kiro/ / .codex/ — the one harness-specific dir)
+│                                 You never browse this; it just runs /aidlc.
+│
+├── aidlc/                        EVERYTHING AI-DLC — neutral, browsable, committed to git
+│   ├── active-space              ← cursor: which space you're in (gitignored, per-user)
+│   └── spaces/
+│       ├── default/              ★ the only space most people ever see
+│       │   ├── memory/           THE METHOD — how this team works (committed)
+│       │   │   ├── org.md          framework defaults
+│       │   │   ├── team.md         your team's practices  (adds to org)
+│       │   │   ├── project.md      project-specific practices (adds to org and team)
+│       │   │   ├── phases/         phase-scoped rules
+│       │   │   └── templates/      your output-format overrides, one per artifact
+│       │   │
+│       │   ├── knowledge/        DOMAIN KNOWLEDGE — standards an agent reads (committed)
+│       │   │   │                   free-form; empty until you add files
+│       │   │   ├── documents/      YOUR ORIGINALS — PDFs, Word, Markdown (you own this)
+│       │   │   │                     nest them however you like; never reorganised
+│       │   │   └── documentkb/     THE CATALOG — derived from documents/ (tool-owned)
+│       │   │       ├── index.json     every indexed document, with its state
+│       │   │       └── <doc-id>/      metadata.json + extracted content.md
+│       │   ├── codekb/           CODE KNOWLEDGE — what each repo is (committed, per-repo)
+│       │   │   └── <repo>/          architecture, component inventory, freshness marker
+│       │   │
+│       │   └── intents/          THE RECORD — one subdir per piece of work
+│       │       ├── active-intent   ← cursor: which intent is current (gitignored)
+│       │       ├── intents.json    the registry: every intent + its scope/repos/status
+│       │       ├── 260620-inventory-api/        ✓ a completed intent
+│       │       └── 260624-export-bug/           ◷ an in-flight intent
+│       │           ├── aidlc-state.md             where this intent is in the lifecycle
+│       │           ├── audit/                     the decision trail
+│       │           └── inception/requirements-analysis/requirements.md   …artifacts
+│       │
+│       └── payments-team/        another SPACE (another team) — identical shape
+│           └── memory/  knowledge/  codekb/  intents/
+│
+├── repo-a/                       YOUR CODE REPOS live as siblings (each its own git)
+└── repo-b/                       an intent can span more than one
+```
+
+Three things are worth pulling out of that tree, because they are the whole idea:
+
+- **`aidlc/spaces/<space>/`** is one team's self-contained world: its method
+  (`memory/`), its knowledge, its code knowledge, and its record of every intent.
+  You get `spaces/default/` for free and, as a solo developer or single team,
+  never look past it.
+- **`intents/<YYMMDD>-<label>/`** is one piece of work — the per-run record that
+  [Your First Workflow](02-your-first-workflow.md) filled in. The `<YYMMDD>` is a
+  compact UTC date so records sort chronologically; the `<label>` is a short,
+  human-readable name. Identity itself is carried by a UUIDv7 in the registry, not
+  the dir name, so two same-day same-label intents stay distinct.
+- **Two cursors** — `active-space` and `active-intent` — record *where you are
+  right now*. They are per-user (gitignored), so two teammates can sit in
+  different intents at the same time without fighting over a shared file.
+
+> **Upgrading from an older version?** Earlier releases kept a single workflow in
+> one flat directory at the project root, which a new run would overwrite. The
+> workspace model replaces that with the per-intent record dirs above, so you can
+> keep many pieces of work side by side without one clobbering another.
+
+---
+
+## Intents — one per piece of work
+
+An **intent** is a single run of the AI-DLC lifecycle, scoped to one task. Every
+intent owns a row in the space's `intents.json` registry — `{uuid, slug, dirName,
+scope, repos, status}` — and a **record dir** holding that run's state, audit
+trail, and artifacts. The `uuid` (a UUIDv7) is the canonical, collision-proof
+identity; `dirName` records the human-readable record-dir name verbatim.
+
+The row's `status` is the intent's lifecycle: `in-flight` from creation,
+`complete` once the last in-scope gate closes, or `archived` when you retire
+work you will not finish or hide work you finished (`/aidlc intent archive
+<name>`). Archiving never deletes anything: the record dir, audit trail, and
+any Bolt worktrees stay put, the default listing just stops showing the row
+(`/aidlc intent list --all` still does), and `/aidlc intent unarchive <name>`
+puts it back the way it was, in flight or complete.
+
+You never create an intent with a special command. The first time you describe
+work, the engine **auto-creates** an intent for you:
+
+```
+/aidlc Build a REST API for inventory management
+```
+
+On a fresh workspace this mints the intent, creates its record dir at
+`aidlc/spaces/default/intents/260624-inventory-api/`, makes it the active intent,
+and starts the first stage — exactly the run you saw in the previous chapter.
+
+### Starting a second piece of work
+
+Here is where the workspace earns its keep. Say you're mid-feature and an
+unrelated bug needs attention. You don't archive anything or run an init command —
+you just describe the new work:
+
+```
+/aidlc Fix the timeout on the export endpoint
+```
+
+When an intent is already active, AI-DLC recognizes that this may be *new,
+unrelated* work rather than a continuation of the current feature, and **asks**
+before starting a second intent alongside the first:
+
+```
+Work is already in progress on: "inventory-api". You said: "Fix the timeout on
+the export endpoint". What should I do?
+1. Part of the active work: continue the current workflow
+2. Separate new piece of work: set it up alongside the current one as "bugfix" work
+3. Reshape the active work: change how the remaining plan is shaped
+```
+
+- Choose **2** and AI-DLC creates a second intent (here, a `bugfix`). Your
+  inventory-api intent is untouched: its record dir, state, and progress are all
+  preserved exactly where you left them.
+- Choose **1** and AI-DLC treats your message as part of the active intent.
+- Choose **3** and AI-DLC works out how to reshape the active intent's
+  remaining plan with you.
+
+Saying only that the work should go on (`/aidlc carry on`, "proceed", "keep
+going", in your own words) asks nothing: AI-DLC reads your words and carries on
+with the active work. With work in the project but none selected yet, it asks
+which piece to pick up; name the piece with your words (`/aidlc continue auth`)
+and it picks that piece up and carries on with it at once.
+
+Settings you type with the new work go with the work you choose.
+`/aidlc --depth minimal --learnings off Fix the timeout on the export endpoint`
+asks the same question: choose **2** and the new intent starts with that depth
+and learnings off; choose **1** or **3** and they apply to the active intent
+(for **3**, before its plan is reshaped). A Guard Policy you lower this way,
+and any other setting typed in the same message, applies to the active intent
+as you send the message; the new intent starts at the default Guard Policy, and
+AI-DLC says so when it creates it. Naming the plan first
+(`/aidlc bugfix Fix the timeout`) asks the same question, proposing that plan.
+When a plan's name is also your own first word (`classic car rental website`),
+the assistant reads which you meant and may ask you once, so your word is never
+spent on a plan you did not choose.
+So does a scope that differs from the active intent's, typed with a
+description (`/aidlc --scope express "add a health endpoint"`), with new work
+first: choose **1** and the description starts new express work, the active
+intent kept as it is, or **2** and the active intent changes to express. A
+scope with no description changes the active intent's scope without asking.
+
+AI-DLC never creates a second intent without asking. If a prompt is genuinely a
+follow-up to the current work — answering a gate, correcting a requirement — it
+stays in the active intent; the offer only appears when the work is clearly
+distinct.
+
+### Switching between intents
+
+List the intents in your space, then switch to one by name (its slug):
+
+```
+/aidlc intent                     List all intents in the active space
+/aidlc intent export-bug          Switch the active intent to "export-bug"
+```
+
+Switching updates the invoking session's binding and writes through to the
+`active-intent` cursor. The next `/aidlc` in that session resumes the intent
+right where it stopped - same stage, same state, same audit trail. You can carry
+any number of intents at once and move between them freely; each is an independent
+run.
+
+> Bare `/aidlc intent` is read-only — it just lists. Add `--json` for
+> machine-readable output. See [CLI Commands](12-cli-commands.md) for the full
+> flag reference.
+
+### Concurrent sessions in one checkout
+
+Each live session keeps a machine-local binding at
+`aidlc/.aidlc-sessions/<session-id>.binding.json`. The binding records the
+session's space and intent, so another terminal or IDE window can move the shared
+cursors without silently moving this session's workflow.
+
+A binding also records how its intent was chosen. Finding a record is not the same
+as joining it: in a fresh clone, where a teammate's intent record is committed but
+your `active-intent` cursor is not, the lone record resolves but no session has
+joined it. The first `/aidlc` asks which intent to work on, and AI-DLC's hooks leave
+that record alone until the session runs `/aidlc intent <slug>` (or creates its own
+intent), or until this machine chooses that record (your `active-intent` cursor
+names it, from another chat or your terminal): then the chat joins it on its next
+turn, silently, as a chat opened after the choice would. What you type in a chat
+that has not joined is still kept, on that chat's own message record outside the
+intent record. A session bound by an earlier version keeps working its intent when your
+cursor names the same record; otherwise it is offered a rebind to that intent. A
+session an earlier version stamped but never bound follows its stamp when it
+resumes, so a chat left open across an upgrade continues its own intent.
+A plain `git worktree` created without AI-DLC's worktree command has no local
+evidence either, so it also selects its intent with `/aidlc intent <slug>`. A Unit
+claimed on this machine counts for that Unit's intent; the Unit participant marker
+is checkout-wide and names no intent, so it does not count as joining a
+particular record.
+
+Session identity follows one order:
+
+1. The host session id delivered to a hook.
+2. A valid `AIDLC_SESSION_OVERRIDE` inherited from the harness process.
+3. The chat the host names in the agent's own shell: Codex's `CODEX_THREAD_ID`,
+   Claude Code's `CLAUDE_CODE_SESSION_ID` while the process its `CLAUDE_PID`
+   names is alive, or Kiro CLI's `KIRO_SESSION_ID`. A shell kept open after its
+   chat ended still carries the variable, which is why Claude Code's id is read
+   only while that chat's process is alive; a dead or absent pid leaves it
+   unread. Kiro CLI puts no pid in the shell, so its id stands on its own, as
+   Codex's does. Other harnesses name no chat there.
+4. The nearest live PID ancestry entry.
+5. No session identity.
+
+Every id found this way, and every hook payload's session id, passes through one
+door before any chat or work record is read. A helper's own id (a spawned Codex
+agent's or review thread's, a Kiro CLI delegation's, a Copilot subagent's) maps
+to the chat it belongs to: the adapter notes the pair from the first hook payload
+that shows both, the one fact the engine cannot learn by itself. That chat's
+binding is then read, and a chat with no binding yet (a host that never ran
+SessionStart for it, or hooks installed after the chat opened) is bound at first
+contact by the same rule SessionStart applies to a new chat: to the work the
+shared cursor names when this machine has joined it, else to no record, silently.
+From then on the chat stays on that work; a switch typed in another window moves
+the cursor, not the chat. A chat bound to no record only because the lone record
+here had not been chosen yet is read again at every entry: once the cursor names
+a record, it joins that work the same way, silently. A command with no session
+identity at all (your own terminal) keeps following the cursor.
+
+Once identity is known, an explicit space or intent selector wins, followed by
+that session's binding, then the shared `active-space` and `active-intent`
+cursors with the existing lone-intent and empty-workspace fallbacks.
+
+For headless automation, set `AIDLC_SESSION_OVERRIDE` on the harness process,
+not on individual tool commands. Every spawned tool then inherits the same
+identity. If that override disagrees with a session found through PID ancestry,
+AI-DLC refuses before writing either workflow and points you to the owning
+conversation or the intent and space switch verbs for rebinding.
+`AIDLC_SESSION_OVERRIDE_SOURCE=payload` is an internal same-user contract, not
+an authenticated security boundary; deliberately setting both variables is
+treated like an intentional sanctioned session switch.
+
+The cursors remain write-through compatibility state. Older or unsupported
+environments with no binding therefore behave exactly as before.
+
+Session bindings isolate workflow selection across spaces, but the
+harness-native method include is still one checkout-wide surface: every
+include reads one git-ignored copy of the active space's memory files,
+`aidlc/active-memory/`, which SessionStart and the space switch verb
+write for the selected space. So two simultaneous sessions in different spaces
+can overwrite which space's ambient rules the harness delivers next. This
+increment supports concurrent intents within one space; concurrent
+multi-space ambient method delivery remains future work.
+
+A space switch changes no tracked file: the includes are the same for every
+teammate, and `aidlc config` refreshes them like any other shipped file. An
+install whose includes an earlier release's switch pointed at another space
+is brought to the shipped files by the next refresh, with no conflict.
+
+The Codex adapter pins the validated hook payload session into every core-hook
+child, and Codex gives every command it runs the session as `CODEX_THREAD_ID`
+(0.145.0 and later, the minimum AI-DLC supports; the hooks do not receive it),
+so the tools read the id from there and every command keeps the words the agent
+wrote: macOS sandbox denial of `ps` does not weaken Codex workflow selection, and
+the shipped `.codex/rules/default.rules` prefixes match what the agent runs. On
+Windows x64 and arm64, native process handles,
+creation times, and parent PIDs identify the owning session within the same
+50 ms / 64-ancestor budget. Reused PID generations and unverified ancestry do not
+select a session.
+Shared-process harnesses still cannot distinguish chats that use one process,
+including Kiro IDE multi-chat and multi-session opencode. Children of payload-bearing hooks follow
+the payload session; tools without that parent still fall back to the shared
+cursors when ancestry is unavailable unless the harness process has a valid
+`AIDLC_SESSION_OVERRIDE`.
+
+Known limitation: hook writes and the intent and space switch verbs in those
+shared-process chats retain the pre-existing v2 shared-cursor and `.current-session`
+behavior. One chat can therefore affect another chat's navigation or hook
+attribution. Per-session isolation for those paths is future work. The exception
+is an intent or space switch typed into a Kiro IDE chat, in either form
+(`/aidlc intent switch <name>` or `/aidlc intent <name>`, and the same for
+`space`): the prompt hook runs it with that chat's session, so it binds only
+that chat.
+
+---
+
+## Spaces — one per team
+
+A **space** is one team's complete world: its own `memory/` (method), `knowledge/`,
+`codekb/`, and `intents/`. Everything in this chapter so far happened inside a
+single space named `default`, which is created for you automatically. **If you're a
+solo developer or a single team, that's the end of the story — you never name a
+space and everything just works.**
+
+Spaces exist for the case where **more than one team shares one project** and each
+wants its own method, knowledge, and record without colliding. Adding a team is
+purely additive: a new `spaces/<name>/` of the identical shape appears beside
+`default/` — nothing moves, nothing migrates.
+
+Create, list, and switch spaces with verbs that mirror the intent verbs exactly:
+
+```
+/aidlc space                      List all spaces
+/aidlc space create payments-team Create a new space, seeded from the framework baseline
+/aidlc space switch payments-team Switch the active space to "payments-team"
+```
+
+The older `/aidlc space-create <name>` and bare `/aidlc space <name>` forms are
+still accepted.
+
+A newly created space starts with the framework's default method (`org.md`) and
+fresh, empty `team.md` / `project.md` practice files — a new team earns its own
+practices rather than inheriting another team's. Its `knowledge/` and `codekb/`
+start empty too.
+
+When you switch spaces, two things follow the cursor automatically:
+
+1. **AI-DLC's own resolvers** — the next intent you start, and the practices and
+   knowledge agents load, all come from the space you switched into.
+2. **The rules your harness loads into context**: switching writes the new
+   space's `memory/` files into `aidlc/active-memory/`, the git-ignored
+   copy your harness's native rule include reads (Claude's `@`-import, Kiro CLI
+   resources, Cursor rules, opencode's instructions, Copilot's `AGENTS.md`;
+   Kiro IDE's steering file carries the text itself, and on Codex the engine
+   hands each step its rules), so the next turn works under that team's method.
+
+No tracked file changes, so a switch never churns the committed tree and
+teammates who pull never pick up your space. The copy is checkout-global
+rather than session-local, so simultaneous sessions in different spaces can
+race on ambient method delivery even though their workflow record selection
+stays bound.
+
+### Knowing which space you're in
+
+When more than one space exists, the status line shows the active `space · intent`
+as a persistent "you are here" — the same way a shell prompt shows your current
+directory — so work never lands in the wrong space. A single-team user, having
+only `default`, sees no space token at all.
+
+---
+
+## Multiple repos in one intent
+
+An intent isn't limited to a single repository. Because your code repos are
+siblings of the workspace (not nested inside any one of them), an intent can span
+as many as it needs.
+
+The repo set is captured **when the intent is created** — you don't type anything
+extra. By default AI-DLC auto-discovers every sibling repo (each immediate child
+of the workspace root that has its own `.git`) and records the set in the intent's
+`intents.json` row. During Construction, each git operation is then anchored to
+the right repo automatically.
+
+```
+my-project/
+├── aidlc/          # the workspace
+├── checkout-api/   # repo-a   ┐ both auto-discovered as siblings;
+└── checkout-web/   # repo-b   ┘ an intent here can touch either or both
+```
+
+An intent that records no repos is the ordinary single-repo case. See
+[Artifacts Reference](14-artifacts-reference.md) for the record-dir details and
+[Multi-repo intent](glossary.md) in the glossary.
+
+### Declaring the repo set (optional manifest)
+
+Auto-discovery needs the sibling repos to already be cloned. On a fresh checkout
+of a shared workspace they are not, so a teammate would have to know which repos
+to clone and where. An **optional** `repos.json` manifest at the workspace root
+records that expected set so it can be reproduced with one command:
+
+```json
+{
+  "org": "your-github-org",
+  "repos": [
+    { "name": "checkout-api", "branch": "main" },
+    { "name": "checkout-web" }
+  ]
+}
+```
+
+`org` supplies the default clone host (a repo with no `url` clones from
+`git@github.com:<org>/<name>.git`; set `url` on an entry to override). `branch`
+selects the checkout for a new clone and is an advisory expectation for a repo
+already on disk; omit it to use the repo's own default. Repo names must be safe
+single path segments, matching the runtime's immediate-child discovery model. The
+[CLI Commands](12-cli-commands.md#aidlc-workspace-sync-clone-and-reconcile-the-declared-repo-set)
+guide documents the `aidlc-workspace-sync` tool that reads this file to clone
+missing repos, keep the gitignore block current, and generate a VSCode
+multi-root workspace.
+
+The manifest is a convenience, not a second source of truth. **Disk wins at
+runtime**: intent creation still auto-discovers whatever siblings are actually
+present, so a repo works the moment it is cloned whether or not it is declared,
+and a declared repo that was never cloned simply is not part of the set. The
+manifest only drives the sync tool and the advisory `--doctor` rows that flag
+when the declared set and the disk have drifted apart. (This "workspace
+manifest" is unrelated to a harness `manifest.ts`, which is a packaging file.)
+
+---
+
+## What's committed and what's not
+
+`aidlc/` is checked into git so a team **shares** its work — the method, the intent
+registry, each intent's state, audit trail, and artifacts all travel with the
+repo. Two kinds of file are deliberately **gitignored** instead:
+
+| Gitignored (per-user, machine-local) | Why |
+|---|---|
+| `aidlc/active-space`, `…/intents/active-intent` | Cursors — "where am I right now." Committing them would turn per-user navigation into shared repository state and have teammates fight over intent creates and cursor switches. |
+| `.../intents/<id>/runtime-graph.json`, `.aidlc-*`, `aidlc/.aidlc-sessions/`, `aidlc/.aidlc-active-space-*.tmp` | Derived, machine-local runtime state, including per-session bindings and PID ancestry entries. |
+| `…/knowledge/documentkb/.journal/` | One directory per in-flight document transaction. Transient and per-clone; a committed journal would be a merge conflict on every concurrent `sync`. |
+| `…/knowledge/.sources.local.json` | Where *this machine* resolves documents linked from outside the repo. The path is machine-specific by definition, so committing it would break every teammate's checkout. |
+
+Everything else under a space — `memory/**`, `knowledge/**`, `codekb/**`,
+`intents.json`, each record's `aidlc-state.md`, `audit/` shards, and artifacts — is
+committed. The rule of thumb: **cursors and runtime scratch are local; the shared
+work is committed.**
+
+`knowledge/documents/` and `knowledge/documentkb/` are both committed, but they are
+owned by different parties and that difference is the whole design. `documents/`
+holds your originals: you add, move, and delete files there, and the framework never
+reorganises them. `documentkb/` is the catalog the tool derives, written
+transactionally under the workspace lock. Its **index** is reconstructible: delete
+`documentkb/index.json` alone and `/aidlc knowledge sync` rebuilds it from the
+surviving per-document `metadata.json` files, tombstones included. Deleting the
+whole `documentkb/` tree is a different, non-recoverable operation — it destroys
+every `metadata.json` too, so document ids and tombstones are lost; `sync` then
+re-onboards the surviving originals as new rows with new ids. That is also why
+hand-editing `documentkb/` is a mistake rather than a shortcut: the next `sync`
+reconciles it back to what `documents/` actually contains.
+
+---
+
+## Next Steps
+
+- [Phases and Stages](04-phases-and-stages.md) — what happens inside one intent's run
+- [Knowledge](08-knowledge.md) — adding your team's standards to a space's `knowledge/`
+- [Rules and the Learning Loop](09-rules-and-the-learning-loop.md) — how a space's `memory/` method is authored and learned
+- [Artifacts Reference](14-artifacts-reference.md) — the per-intent record dir in detail
+- [CLI Commands](12-cli-commands.md) — the full `space` / `intent` verb reference
+- [Glossary](glossary.md) — Space, Intent, Record dir, and Multi-repo intent defined
+```
